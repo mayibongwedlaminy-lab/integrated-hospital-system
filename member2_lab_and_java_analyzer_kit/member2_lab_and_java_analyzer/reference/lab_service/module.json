@@ -1,0 +1,6 @@
+{
+  "name": "laboratory",
+  "language": "Java (JDK only, no libraries)",
+  "run": "run.py",
+  "note": "A native module: it does not use the Python engine. It only has to keep contract.xml."
+}

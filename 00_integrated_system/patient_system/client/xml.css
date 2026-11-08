@@ -1,0 +1,13 @@
+/* styles for the XML definition viewer (used together with app.css by xml.xsl); every class is x- prefixed */
+.card.xml{padding:1.25rem 1.5rem 1.75rem}
+.x-node{margin:.5rem 0;border-left:3px solid var(--line);padding-left:1rem}
+.x-head{display:flex;gap:.35rem .5rem;flex-wrap:wrap;align-items:center}
+.x-body{margin-top:.3rem}
+.x-tag{font-weight:700;font-size:.9rem;color:#fff;background:var(--blue);border-radius:8px;padding:.05rem .65rem}
+.x-attr{font-size:.85rem;background:var(--soft);border:1px solid var(--line);border-radius:8px;padding:.05rem .6rem;word-break:break-word}
+.x-attr b{color:var(--muted);font-weight:600;margin-right:.4rem}
+.x-note{margin:.6rem 0;padding:.55rem .85rem;background:var(--amberbg);border-radius:8px;color:var(--amberfg);font-size:.88rem}
+.t-table,.t-stat,.t-chart{background:#0A7A55}
+.t-endpoint,.t-route,.t-panel,.t-timeline,.t-source,.t-notify,.t-attach{background:#005A94}
+.t-form,.t-field,.t-rowaction,.t-button{background:#8A5A00}
+.t-role,.t-service,.t-gateway,.t-portal,.t-seed,.t-history,.t-peer,.t-upstream,.t-user,.t-doc,.t-step{background:var(--ink)}

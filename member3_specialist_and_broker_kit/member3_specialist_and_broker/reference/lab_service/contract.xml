@@ -1,0 +1,20 @@
+<!-- CONTRACT: laboratory service (port 8002). Owner: lab team. -->
+<contract version="2" service="laboratory" kind="service" port="8002">
+  <privacy forbid="name,national_id,dob,allergies,diagnosis,symptoms,drug,dosage"/>  <!-- the lab only knows a patient number -->
+
+  <step method="POST" path="/lab/staff" name="tech"><body username="tech_{rand}" full_name="Contract Technician" role="lab_technician"/><expect fields="id,username,full_name,role,active"/></step>
+  <step method="GET" path="/lab/staff" list="true"><expect fields="id,username,full_name,active"/></step>
+  <step method="PUT" path="/lab/staff/{tech.id}"><body active="no"/><expect field="active" equals="no"/></step>
+
+  <step method="POST" path="/lab/requests" name="req">
+    <body patient_id="1" case_id="7" test="Malaria"/>
+    <expect fields="id,patient_id,case_id,test,result,requested_by,technician,status,created"/>
+    <expect field="status" equals="pending"/><expect field="test" equals="Malaria"/>
+  </step>
+  <step method="GET" path="/lab/requests?patient_id=1" list="true"><expect fields="id,patient_id,test,status"/></step>
+  <step method="PUT" path="/lab/results/{req.id}">
+    <body result="negative"/>
+    <expect field="status" equals="completed"/><expect field="result" equals="negative"/>
+  </step>
+  <step method="PUT" path="/lab/results/999999" status="404"><body result="x"/></step>
+</contract>

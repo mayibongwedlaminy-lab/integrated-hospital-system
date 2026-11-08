@@ -1,0 +1,11 @@
+<!-- CONTRACT: the Java lab analyzer. Owner: lab team (Java).
+     The analyzer has no REST interface: it works only through the message broker. So this contract is checked from the outside:
+     order an automated test at the lab, and the analyzer's result must come back through the broker and complete the request.
+     Needs Java and the whole system running (python check.py starts them). -->
+<contract version="1" service="analyzer" kind="service" port="8002">
+  <step method="POST" path="/lab/requests" name="req"><body patient_id="{rand}" test="Blood glucose"/></step>
+  <!-- lab service -> queue lab.analyzer.orders -> Java analyzer -> queue lab.analyzer.results -> lab service -->
+  <step method="GET" path="/lab/requests?patient_id={rand}" list="true" retry="30">
+    <expect field="status" equals="completed"/><expect field="result" contains="mmol/L"/>
+  </step>
+</contract>

@@ -1,0 +1,4 @@
+-r requirements.txt
+pytest
+pypdf
+playwright   # only for tests/test_ui.py (then: playwright install chromium)

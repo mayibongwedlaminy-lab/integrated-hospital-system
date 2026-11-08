@@ -1,0 +1,29 @@
+<service name="laboratory" port="8002" db="lab.json" language="Java">
+  <!-- Written in Java, not Python: src/pps/lab/Main.java reads this file and serves exactly what it declares (tables, endpoints, messages).
+       The data is kept in lab.json (the JDK has no database; see Store.java). -->
+  <!-- MESSAGING -->
+  <messaging broker="http://localhost:8005" client="lab">
+    <!-- requests the gateway saved while the lab was offline arrive here and are handled exactly like a normal request -->
+    <consume queue="lab.requests" endpoint="POST /lab/requests"/>
+    <!-- results from the automated (Java) analyzer: the message's correlation id is the request number -->
+    <consume queue="lab.analyzer.results" endpoint="PUT /lab/results/{request_id}" id="correlation_id"/>
+
+    <send after="POST /lab/requests" to="events" type="LabRequested" fields="id,patient_id,case_id,test,requested_by"/>
+    <!-- automated tests are ordered from the analyzer; it replies to lab.analyzer.results with the same correlation id -->
+    <send after="POST /lab/requests" to="lab.analyzer.orders" when="test=Blood glucose" fields="id,patient_id,test" correlation="id" reply_to="lab.analyzer.results"/>
+    <send after="POST /lab/requests" to="lab.analyzer.orders" when="test=Malaria rapid test" fields="id,patient_id,test" correlation="id" reply_to="lab.analyzer.results"/>
+    <send after="PUT /lab/results/{request_id}" to="events" type="LabResultReady" fields="id,patient_id,case_id,test,result,status,requested_by,technician"/>
+  </messaging>
+
+  <table name="lab_requests" fields="patient_id,case_id,test,result,requested_by,technician,status=pending"/>
+  <table name="staff" fields="username,full_name,role=lab_technician,active=yes" unique="username"/>
+
+  <endpoint method="POST" path="/lab/requests" table="lab_requests" action="insert" stamp="requested_by"/>
+  <endpoint method="GET"  path="/lab/requests" table="lab_requests" action="list"/>
+  <endpoint method="PUT"  path="/lab/results/{request_id}" table="lab_requests" action="update" set="status=completed" stamp="technician"/>
+
+  <!-- the laboratory's own staff -->
+  <endpoint method="POST" path="/lab/staff"      table="staff" action="insert"/>
+  <endpoint method="GET"  path="/lab/staff"      table="staff" action="list"/>
+  <endpoint method="PUT"  path="/lab/staff/{id}" table="staff" action="update"/>
+</service>

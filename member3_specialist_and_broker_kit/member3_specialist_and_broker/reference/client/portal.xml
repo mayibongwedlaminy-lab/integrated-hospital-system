@@ -1,0 +1,300 @@
+<?xml-stylesheet type="text/xsl" href="xml.xsl"?>
+<!-- Everything the portal shows is declared here: dashboards per role, forms, and the history timeline.
+     tone = blue | green | amber | red.  columns = field:Label[:type]  (types: badge, chips, warn, time, patient). -->
+<portal>
+  <!-- Roles. Several people can have the same role: each signs in with their own account and sees their own work.
+       panel mine="column": a tick-box "Only mine" narrows the list to rows where that column is the signed-in person.
+       {me} in where="..." means the signed-in person; {today} means today's date. -->
+
+  <role name="receptionist" label="Receptionist" title="Reception desk"
+        blurb="Register new patients, find their records and book appointments with the doctors.">
+    <preload source="/api/people"/>
+    <button form="patient" label="Register patient"/>
+    <button form="appointment" label="Book appointment"/>
+    <stat label="Patients registered" source="/patients" tone="blue"/>
+    <stat label="Patients with allergies noted" source="/patients" where="allergies!=" tone="amber"/>
+    <stat label="Appointments today" source="/appointments" where="date={today},status=scheduled" tone="blue"/>
+    <stat label="Registered by me" source="/patients" where="registered_by={me}" tone="green"/>
+    <panel title="Patients" source="/patients"
+           columns="name:Name,national_id:National ID,dob:Date of birth,allergies:Allergies:chips,registered_by:Registered by:person,created:Registered:time"
+           empty="No patients yet. Use Register patient to add the first one.">
+      <rowaction label="Book appointment" form="appointment" fill="patient_id={id}"/>
+      <rowaction label="Edit details" form="patient-edit" fill="id={id}" prefill="true"/>
+    </panel>
+    <panel title="Appointments" source="/appointments" sort="date,time"
+           columns="date:Date,time:Time,patient_id:Patient:patient,doctor:Doctor:person,reason:Reason,note:Note,status:Status:badge"
+           empty="No appointments yet. Use Book appointment to add one.">
+      <rowaction label="Cancel" method="PUT" path="/appointments/{id}" body="status=cancelled" when="status=scheduled"
+                 confirm="Cancel the appointment on {date} at {time}?" success="Appointment cancelled."/>
+    </panel>
+    <panel title="Doctors on duty" source="/staff?role=doctor&amp;active=yes"
+           columns="full_name:Doctor,specialty:Specialty,working_days:Working days,start:From,end:Until"
+           empty="No doctors yet. The administrator adds them (Administration, Add staff member) with their working days and hours."/>
+    <panel title="Time off" source="/time-off" sort="date_from"
+           columns="doctor:Doctor:person,date_from:From,date_to:Until,reason:Reason,status:Status:badge" empty="No doctor has marked time off."/>
+  </role>
+
+  <role name="doctor" label="Doctor" title="Doctor dashboard"
+        blurb="Your own appointments, consultations and results. Treat a patient or refer them to a specialist, then prescribe or close the case.">
+    <preload source="/api/people"/>
+    <button form="appointment" label="Book appointment"/>
+    <button form="time-off" label="Mark myself unavailable"/>
+    <stat label="Patients" source="/patients" tone="blue"/>
+    <stat label="My appointments today" source="/appointments" where="date={today},status=scheduled,doctor={me}" tone="blue"/>
+    <stat label="My open consultations" source="/consultations" where="status=open,doctor={me}" tone="blue"/>
+    <stat label="My lab tests waiting" source="/lab/requests" where="status=pending,requested_by={me}" tone="amber"/>
+    <stat label="My referrals waiting" source="/referrals" where="status=pending,doctor={me}" tone="amber"/>
+    <stat label="Allergy warnings (mine)" source="/prescriptions" where="warning!=,doctor={me}" tone="red"/>
+    <stat label="Drug interactions (mine)" source="/prescriptions" where="interaction!=,doctor={me}" tone="amber"/>
+    <chart title="My consultations" source="/consultations" where="doctor={me}" group="status"/>
+    <chart title="Where my consultations stand" source="/consultations" where="doctor={me},outcome!=" group="outcome"/>
+    <chart title="My referrals" source="/referrals" where="doctor={me}" group="status"/>
+    <panel title="Patients" source="/patients"
+           columns="name:Name,national_id:National ID,dob:Date of birth,allergies:Allergies:chips"
+           empty="No patients yet. A receptionist registers them.">
+      <rowaction label="Full history" view="history"/>
+      <rowaction label="Start consultation" form="consultation" fill="patient_id={id}"/>
+      <rowaction label="Edit details" form="patient-edit" fill="id={id}" prefill="true"/>
+    </panel>
+    <panel title="Appointments" source="/appointments" sort="date,time" mine="doctor"
+           columns="date:Date,time:Time,patient_id:Patient:patient,doctor:Doctor:person,reason:Reason,note:Note,status:Status:badge"
+           empty="No appointments yet.">
+      <rowaction label="Start consultation" form="consultation" fill="patient_id={patient_id}" when="status=scheduled"/>
+      <rowaction label="Mark done" method="PUT" path="/appointments/{id}" body="status=completed" when="status=scheduled"
+                 confirm="Mark the appointment on {date} at {time} as done?" success="Appointment marked as done."/>
+      <rowaction label="Cancel" method="PUT" path="/appointments/{id}" body="status=cancelled" when="status=scheduled"
+                 confirm="Cancel the appointment on {date} at {time}?" success="Appointment cancelled."/>
+    </panel>
+    <panel title="Consultations" source="/consultations" mine="doctor"
+           columns="patient_id:Patient:patient,symptoms:Symptoms,vitals:Vital signs:vitals,diagnosis:Diagnosis,outcome:Outcome:badge,status:Status:badge,created:Recorded:time"
+           empty="No consultations yet. Start one from the Patients or Appointments tab.">
+      <rowaction label="Lab test" form="lab" fill="patient_id={patient_id},case_id={id}" when="status=open"/>
+      <rowaction label="Treat" form="treat" fill="id={id}" prefill="true" when="status=open"/>
+      <rowaction label="Refer" form="referral" fill="patient_id={patient_id},case_id={id}" when="status=open"/>
+      <rowaction label="Prescribe" form="prescription" fill="patient_id={patient_id},case_id={id}" when="status=open"/>
+      <rowaction label="Close case" method="PUT" path="/consultations/{id}/close" when="status=open"
+                 confirm="Close this consultation? You will not be able to add to it afterwards." success="Consultation closed."/>
+      <rowaction label="Discharge summary" download="/api/cases/{id}/discharge.pdf" file="discharge-case-{id}.pdf" when="status=closed"/>
+      <rowaction label="History" view="history" patient="patient_id"/>
+    </panel>
+    <panel title="Lab tests" source="/lab/requests" mine="requested_by"
+           columns="patient_id:Patient:patient,test:Test,result:Result,technician:Run by:person,status:Status:badge,created:Requested:time"
+           empty="You have not requested any lab tests."/>
+    <panel title="Referrals" source="/referrals" mine="doctor"
+           columns="patient_id:Patient:patient,specialty:Specialty,specialist:Specialist:person,reason:Reason,report:Findings,action:Specialist did:badge,treatment:Treatment,status:Status:badge,created:Sent:time"
+           empty="You have not referred anyone."/>
+    <panel title="Prescriptions" source="/prescriptions" mine="doctor"
+           columns="patient_id:Patient:patient,drug:Drug,dosage:Dosage,warning:Allergy check:warn,interaction:Interactions:interaction,pharmacist:Dispensed by:person,status:Status:badge,created:Sent:time"
+           empty="You have not prescribed anything."/>
+    <panel title="My time off" source="/time-off" mine="doctor" sort="date_from"
+           columns="date_from:From,date_to:Until,reason:Reason,status:Status:badge" empty="You have not marked any time off. New appointments avoid the days you mark.">
+      <rowaction label="Cancel" method="PUT" path="/time-off/{id}" body="status=cancelled" when="status=active"
+                 confirm="Cancel this time off? You can be booked on those days again." success="Time off cancelled."/>
+    </panel>
+  </role>
+
+  <role name="lab_technician" label="Lab technician" title="Laboratory bench"
+        blurb="Test requests from doctors. Enter a result and it goes straight back to the requesting doctor.">
+    <preload source="/api/people"/>
+    <stat label="Waiting for a result" source="/lab/requests" where="status=pending" tone="amber"/>
+    <stat label="Completed" source="/lab/requests" where="status=completed" tone="green"/>
+    <stat label="Completed by me" source="/lab/requests" where="status=completed,technician={me}" tone="blue"/>
+    <chart title="Tests by status" source="/lab/requests" group="status"/>
+    <panel title="Waiting" source="/lab/requests" where="status=pending"
+           columns="id:Request,patient_id:Patient:patient,test:Test,requested_by:Requested by:person,created:Requested:time"
+           empty="No tests are waiting.">
+      <rowaction label="Enter result" form="lab-result" fill="request_id={id}"/>
+    </panel>
+    <panel title="Completed" source="/lab/requests" where="status=completed" mine="technician"
+           columns="id:Request,patient_id:Patient:patient,test:Test,result:Result,technician:Run by:person,requested_by:Requested by:person,created:Requested:time"
+           empty="No completed tests yet."/>
+  </role>
+
+  <role name="specialist" label="Specialist" title="Specialist clinic"
+        blurb="Patients referred to you, by your specialty. Treat the patient or recommend a treatment to the referring doctor.">
+    <preload source="/api/people"/>
+    <stat label="Waiting for me" source="/referrals" where="status=pending" tone="amber"/>
+    <stat label="Answered" source="/referrals" where="status=reported" tone="green"/>
+    <stat label="I treated" source="/referrals" where="action=treated" tone="blue"/>
+    <stat label="I recommended treatment" source="/referrals" where="action=recommended" tone="blue"/>
+    <chart title="My referrals by status" source="/referrals" group="status"/>
+    <panel title="Waiting" source="/referrals" where="status=pending"
+           columns="id:Referral,patient_id:Patient:patient,specialty:Specialty,doctor:Referred by:person,reason:Reason,created:Sent:time"
+           empty="No referrals are waiting for you.">
+      <rowaction label="Treat or recommend" form="referral-report" fill="id={id}"/>
+    </panel>
+    <panel title="Answered" source="/referrals" where="status=reported"
+           columns="id:Referral,patient_id:Patient:patient,doctor:Referred by:person,report:Findings,action:I did:badge,treatment:Treatment,created:Sent:time"
+           empty="You have not answered any referrals yet."/>
+  </role>
+
+  <role name="pharmacist" label="Pharmacist" title="Pharmacy counter"
+        blurb="Prescriptions from doctors, checked against the patient's allergies and other medicines. Dispensing closes the hospital case.">
+    <preload source="/api/people"/>
+    <stat label="To dispense" source="/prescriptions" where="status=pending" tone="amber"/>
+    <stat label="Dispensed" source="/prescriptions" where="status=dispensed" tone="green"/>
+    <stat label="Dispensed by me" source="/prescriptions" where="status=dispensed,pharmacist={me}" tone="blue"/>
+    <stat label="Allergy warnings" source="/prescriptions" where="warning!=" tone="red"/>
+    <stat label="Drug interactions" source="/prescriptions" where="interaction!=" tone="amber"/>
+    <chart title="Prescriptions by status" source="/prescriptions" group="status"/>
+    <panel title="To dispense" source="/prescriptions" where="status=pending"
+           columns="id:Rx,patient_id:Patient:patient,drug:Drug,dosage:Dosage,warning:Allergy check:warn,interaction:Interactions:interaction,doctor:Prescribed by:person,created:Received:time"
+           empty="Nothing to dispense right now.">
+      <rowaction label="Dispense" method="PUT" path="/prescriptions/{id}/dispense"
+                 confirm="Dispense {drug} {dosage} for patient #{patient_id}?" success="Dispensed. The hospital case is now closed."/>
+    </panel>
+    <panel title="Dispensed" source="/prescriptions" where="status=dispensed" mine="pharmacist"
+           columns="id:Rx,patient_id:Patient:patient,drug:Drug,dosage:Dosage,warning:Allergy check:warn,interaction:Interactions:interaction,pharmacist:Dispensed by:person,doctor:Prescribed by:person,created:Received:time"
+           empty="Nothing dispensed yet."/>
+  </role>
+
+  <role name="administrator" label="Administrator" title="Administration"
+        blurb="Add and manage the staff, see who read or changed patient data, who was turned away, and how the queues are doing.">
+    <preload source="/api/people"/>
+    <button form="staff-add" label="Add staff member"/>
+    <stat label="Active staff" source="/api/staff" where="active=yes" tone="blue"/>
+    <stat label="Doctors" source="/api/staff" where="role=doctor,active=yes" tone="blue"/>
+    <stat label="Specialists" source="/api/staff" where="role=specialist,active=yes" tone="blue"/>
+    <stat label="Requests logged" source="/audit" tone="blue"/>
+    <stat label="Turned away (wrong role)" source="/audit" where="status=403" tone="amber"/>
+    <stat label="Hit an offline service" source="/audit" where="status=503" tone="red"/>
+    <stat label="Destinations with dead letters" source="/api/messaging" where="dead!=0" tone="red"/>
+    <stat label="Queues with waiting messages" source="/api/messaging" where="ready!=0" tone="amber"/>
+    <chart title="Staff by role" source="/api/staff" where="active=yes" group="role"/>
+    <chart title="Requests by result code" source="/audit" group="status"/>
+    <panel title="Staff" source="/api/staff" sort="role,full_name"
+           columns="full_name:Name,username:Username,role:Role,specialty:Specialty,schedule:Working days and hours,active:Active:badge,note:Note"
+           empty="No staff yet.">
+      <rowaction label="Edit" form="staff-edit" fill="id={id}" prefill="true"/>
+      <rowaction label="Reset password" form="staff-password" fill="id={id}"/>
+      <rowaction label="Deactivate" method="PUT" path="/api/staff/{id}" body="active=no" when="active=yes"
+                 confirm="Deactivate {full_name}? They will be signed out and can not sign in until you activate them again." success="Account deactivated."/>
+      <rowaction label="Activate" method="PUT" path="/api/staff/{id}" body="active=yes" when="active=no" success="Account activated."/>
+    </panel>
+    <panel title="Audit log" source="/audit" newest="first"
+           columns="time:Time:time,user:User,role:Role,method:Method,path:Request,status:Result:badge"
+           empty="Nothing has been logged yet."/>
+    <panel title="Messaging" source="/api/messaging" sort="destination"
+           columns="destination:Queue or topic subscription,kind:Kind,ready:Waiting,inflight:Being handled,dead:Dead letters,who_sends:Sent by,who_receives:Received by,purpose:Purpose"
+           empty="The message broker is not answering.">
+      <rowaction label="Retry dead letters" method="POST" path="/api/messaging/{id}/retry" when="dead!=0"
+                 confirm="Put the dead letters of {destination} back in line to be delivered again?" success="Dead letters put back in line."/>
+    </panel>
+  </role>
+
+  <!-- ===== forms ===== -->
+  <form name="patient" title="Register patient" method="POST" path="/patients" submit="Register" success="{name} is registered.">
+    <field name="national_id" label="National ID" required="true" placeholder="e.g. 7001010001"/>
+    <field name="name" label="Full name" required="true"/>
+    <field name="dob" label="Date of birth" type="date"/>
+    <field name="allergies" label="Allergies" hint="Separate with commas, for example: penicillin, latex. Leave empty if none are known."/>
+  </form>
+  <form name="patient-edit" title="Edit patient details" method="PUT" path="/patients/{id}" submit="Save changes" success="Changes saved for {name}.">
+    <field name="id" label="Patient number" type="number" required="true"/>
+    <field name="name" label="Full name" required="true"/>
+    <field name="dob" label="Date of birth" type="date"/>
+    <field name="allergies" label="Allergies" hint="Separate with commas. New prescriptions are checked against this list."/>
+  </form>
+  <form name="appointment" title="Book appointment" method="POST" path="/appointments" submit="Book" success="Booked with {doctor_name} on {date} at {time}. {note}">
+    <field name="patient_id" label="Patient" type="patient" required="true"/>
+    <field name="doctor" label="Doctor" type="choice" source="/staff?role=doctor&amp;active=yes" value="username" label_field="full_name"
+           any="Any available doctor" hint="If this doctor is not free then, the next available doctor is booked, or the next free slot."/>
+    <field name="date" label="Date" type="date" required="true"/>
+    <field name="time" label="Time" type="time" step="1800" required="true"/>
+    <field name="reason" label="Reason" placeholder="e.g. General check-up"/>
+  </form>
+  <form name="time-off" title="Mark myself unavailable" method="POST" path="/time-off" submit="Mark unavailable" success="You are marked unavailable from {date_from} to {date_to}.">
+    <field name="date_from" label="First day" type="date" required="true"/>
+    <field name="date_to" label="Last day" type="date" required="true"/>
+    <field name="reason" label="Reason" placeholder="e.g. conference, leave"/>
+  </form>
+  <form name="consultation" columns="2" title="Start consultation" method="POST" path="/consultations" submit="Save consultation" success="Consultation saved. Case number is {id}.">
+    <field name="patient_id" label="Patient" type="patient" required="true"/>
+    <field name="symptoms" label="Symptoms" type="textarea" required="true" wide="true"/>
+    <field name="temp" label="Temperature (°C)" type="number" step="0.1" min="30" max="45" placeholder="37.0"/>
+    <field name="pulse" label="Pulse (beats per minute)" type="number" min="20" max="250"/>
+    <field name="bp_sys" label="Blood pressure, top number" type="number" min="50" max="260" placeholder="120"/>
+    <field name="bp_dia" label="Blood pressure, bottom number" type="number" min="30" max="160" placeholder="80"/>
+    <field name="spo2" label="Oxygen saturation (%)" type="number" min="50" max="100"/>
+    <field name="vitals" label="Other observations" wide="true"/>
+  </form>
+  <form name="treat" title="Treat patient" method="PUT" path="/consultations/{id}/diagnosis" submit="Save treatment" success="Treatment recorded. Prescribe medicine, refer, or close the case when you are done.">
+    <field name="id" label="Consultation number" type="number" required="true"/>
+    <field name="diagnosis" label="Diagnosis" required="true"/>
+    <field name="treatment" label="Treatment plan" type="textarea" required="true" hint="Refer to the lab results and specialist reports in the patient's full history."/>
+  </form>
+  <form name="lab" title="Request lab test" method="POST" path="/lab/requests" submit="Send to laboratory" success="Test request sent to the laboratory.">
+    <field name="patient_id" label="Patient" type="patient" required="true"/>
+    <field name="case_id" label="Consultation number" type="number"/>
+    <field name="test" label="Test" required="true" placeholder="e.g. Blood glucose" hint="Blood glucose and Malaria rapid test are run on the automated analyzer."/>
+  </form>
+  <form name="referral" title="Refer to specialist" method="POST" path="/referrals" submit="Send referral" success="Referral sent to the {specialty} clinic, assigned to {specialist_name}.">
+    <field name="patient_id" label="Patient" type="patient" required="true"/>
+    <field name="case_id" label="Consultation number" type="number"/>
+    <field name="specialty" label="Specialty" type="choice" source="/specialists" value="specialty" unique="true" required="true"
+           hint="It goes to the specialist of that specialty with the fewest waiting referrals."/>
+    <field name="reason" label="Reason for referral" type="textarea" required="true"/>
+  </form>
+  <form name="prescription" title="Create prescription" method="POST" path="/prescriptions" submit="Send to pharmacy" success="Prescription sent to the pharmacy.">
+    <field name="patient_id" label="Patient" type="patient" required="true"/>
+    <field name="case_id" label="Consultation number" type="number" required="true" hint="Dispensing closes this consultation."/>
+    <field name="drug" label="Drug" required="true"/>
+    <field name="dosage" label="Dosage" required="true" placeholder="e.g. 500 mg, three times a day for 5 days"/>
+  </form>
+  <form name="lab-result" title="Enter lab result" method="PUT" path="/lab/results/{request_id}" submit="Send result" success="Result sent to the doctor.">
+    <field name="request_id" label="Request number" type="number" required="true"/>
+    <field name="result" label="Result" type="textarea" required="true"/>
+  </form>
+  <form name="referral-report" title="Treat or recommend" method="PUT" path="/referrals/{id}/report" submit="Send to the referring doctor" success="Your answer was sent to the referring doctor.">
+    <field name="id" label="Referral number" type="number" required="true"/>
+    <field name="report" label="Findings" type="textarea" required="true"/>
+    <field name="action" label="What did you do?" type="select" required="true" options="treated|I treated the patient,recommended|I recommend a treatment to the doctor"/>
+    <field name="treatment" label="Treatment given or recommended" type="textarea" required="true"/>
+  </form>
+  <form name="staff-add" columns="2" title="Add staff member" method="POST" path="/api/staff" submit="Add" success="{full_name} can now sign in as {username}.">
+    <field name="role" label="Role" type="select" required="true" options="doctor,specialist,receptionist,lab_technician,pharmacist,administrator"/>
+    <field name="username" label="Username" required="true" placeholder="e.g. dr_simelane" hint="Lowercase letters, digits, dots, dashes, underscores."/>
+    <field name="full_name" label="Full name" required="true" wide="true"/>
+    <field name="password" label="Starting password" type="password" required="true" hint="At least 8 characters. They can keep it or you can reset it."/>
+    <field name="specialty" label="Specialty" hint="Doctors: for example General Practice. Specialists: ENT, Cardiology, Dermatology..."/>
+    <field name="working_days" label="Working days (doctors)" type="days"/>
+    <field name="start" label="Starts (doctors)" type="time"/>
+    <field name="end" label="Ends (doctors)" type="time"/>
+    <field name="slot_minutes" label="Appointment length, minutes (doctors)" type="number" min="5" max="120" placeholder="30"/>
+  </form>
+  <form name="staff-edit" columns="2" title="Edit staff member" method="PUT" path="/api/staff/{id}" submit="Save changes" success="{full_name} was updated.">
+    <field name="id" label="Username"/>
+    <field name="full_name" label="Full name" required="true" wide="true"/>
+    <field name="specialty" label="Specialty"/>
+    <field name="working_days" label="Working days (doctors)" type="days"/>
+    <field name="start" label="Starts (doctors)" type="time"/>
+    <field name="end" label="Ends (doctors)" type="time"/>
+    <field name="slot_minutes" label="Appointment length, minutes (doctors)" type="number" min="5" max="120"/>
+  </form>
+  <form name="password" title="Change my password" method="POST" path="/api/password" submit="Change password" success="Your password was changed.">
+    <field name="current_password" label="Current password" type="password" required="true"/>
+    <field name="new_password" label="New password" type="password" required="true" hint="At least 8 characters, different from the current one."/>
+  </form>
+  <form name="staff-password" title="Reset password" method="PUT" path="/api/staff/{id}" submit="Set password" success="The password was changed.">
+    <field name="id" label="Username"/>
+    <field name="password" label="New password" type="password" required="true" hint="At least 8 characters."/>
+  </form>
+
+  <!-- vital-sign charts in the patient history: low/high = normal range (shaded); readings outside it turn red -->
+  <vitals>
+    <trend label="Blood pressure (mmHg)" fields="bp_sys,bp_dia" low="60" high="140"/>
+    <trend label="Temperature (°C)" fields="temp" low="36" high="37.5"/>
+    <trend label="Pulse (beats per minute)" fields="pulse" low="60" high="100"/>
+    <trend label="Oxygen saturation (%)" fields="spo2" low="95" high="100"/>
+  </vitals>
+
+  <history>
+    <timeline source="appointments" org="Hospital" by="doctor" title="Appointment on {date} at {time}" detail="Reason: {reason}" extra="{note}"/>
+    <timeline source="consultations" org="Hospital" by="doctor" title="Consultation, case #{id}" detail="Symptoms: {symptoms}" extra="Vital signs: {summary}"
+              more="Diagnosis: {diagnosis}. Treatment plan: {treatment}" more2="Outcome: {outcome}"/>
+    <timeline source="lab_tests" org="Laboratory" by="requested_by" title="Lab test: {test}" detail="Result: {result}"/>
+    <timeline source="referrals" org="Specialist clinic" by="doctor" title="Referral to {specialty}" detail="Reason: {reason}" extra="Findings: {report}" more="Specialist {action}: {treatment}"/>
+    <timeline source="diagnoses" org="Hospital" by="doctor" title="Diagnosis: {diagnosis}" detail="{notes}"/>
+    <timeline source="prescriptions" org="Pharmacy" by="doctor" title="Prescription: {drug}" detail="Dosage: {dosage}" warn="warning,interaction"/>
+  </history>
+</portal>

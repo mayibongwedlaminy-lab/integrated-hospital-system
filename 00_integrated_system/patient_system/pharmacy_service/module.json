@@ -1,0 +1,6 @@
+{
+  "name": "pharmacy",
+  "language": "Node.js (Express)",
+  "run": "run.py",
+  "note": "A native module: it does not use the Python engine. It only has to keep contract.xml."
+}

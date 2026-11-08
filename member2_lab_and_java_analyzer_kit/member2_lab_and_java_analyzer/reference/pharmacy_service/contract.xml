@@ -1,0 +1,34 @@
+<!-- CONTRACT: pharmacy service (port 8004). Owner: pharmacy team.
+     Dispensing must close the hospital case (by a message through the broker), so the hospital and the broker must be running for this contract. -->
+<contract version="2" service="pharmacy" kind="service" port="8004">
+  <peer name="hospital" port="8001"/>
+  <privacy forbid="result,test,specialty,report,diagnosis,symptoms,name,national_id,dob"/>  <!-- prescriptions and allergy flags only -->
+
+  <step method="POST" path="/pharmacists" name="ph"><body username="ph_{rand}" full_name="Contract Pharmacist" role="pharmacist"/><expect fields="id,username,full_name,active"/></step>
+  <step method="GET" path="/pharmacists" list="true"><expect fields="id,username,full_name,active"/></step>
+
+  <!-- set-up: a patient and an open case at the hospital -->
+  <step method="POST" path="/patients" on="hospital" privacy="off" name="patient"><body national_id="{rand}" name="Pharmacy Contract"/></step>
+  <step method="POST" path="/consultations" on="hospital" privacy="off" name="case"><body patient_id="{patient.id}" symptoms="test"/></step>
+
+  <step method="POST" path="/prescriptions" name="rx1">
+    <body patient_id="{patient.id}" case_id="{case.id}" drug="Penicillin V" dosage="500 mg" allergies="penicillin"/>
+    <expect fields="id,patient_id,case_id,doctor,drug,dosage,allergies,warning,interaction,pharmacist,status,created"/>
+    <expect field="warning" contains="ALLERGY CONFLICT"/><expect field="status" equals="pending"/>
+  </step>
+  <step method="POST" path="/prescriptions" name="rx2">
+    <body patient_id="{patient.id}" case_id="{case.id}" drug="Aspirin 75 mg" dosage="daily" allergies=""/>
+    <expect field="warning" equals=""/><expect field="interaction" equals=""/>
+  </step>
+  <step method="POST" path="/prescriptions" name="rx3">
+    <body patient_id="{patient.id}" case_id="{case.id}" drug="Warfarin 5 mg" dosage="daily" allergies=""/>
+    <expect field="interaction" contains="MAJOR"/>
+  </step>
+  <step method="GET" path="/prescriptions?patient_id={patient.id}" list="true"><expect fields="id,drug,warning,interaction,status"/></step>
+  <step method="PUT" path="/prescriptions/{rx2.id}/dispense">
+    <expect field="status" equals="dispensed"/>
+  </step>
+  <!-- the hospital closes the case when it receives the message from the broker, a moment later -->
+  <step method="GET" path="/consultations/{case.id}" on="hospital" privacy="off" retry="15"><expect field="status" equals="closed"/></step>
+  <step method="PUT" path="/prescriptions/999999/dispense" status="404"/>
+</contract>

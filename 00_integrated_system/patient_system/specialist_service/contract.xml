@@ -1,0 +1,23 @@
+<!-- CONTRACT: specialist service (port 8003). Owner: specialist team. Each specialist has a specialty; a referral goes to a specialist of
+     the specialty asked for, and only that specialist answers it: they treat the patient, or recommend a treatment to the doctor. -->
+<contract version="2" service="specialist" kind="service" port="8003">
+  <privacy forbid="name,national_id,dob,allergies,drug,dosage,test,diagnosis"/>
+
+  <step method="POST" path="/specialists" name="s1"><body username="s1_{rand}" full_name="Dr. First Specialist" specialty="Spec{rand}"/><expect fields="id,username,full_name,specialty,active"/></step>
+  <step method="POST" path="/specialists" status="422"><body username="s2_{rand}" full_name="No specialty"/></step>
+  <step method="GET" path="/specialists" list="true"><expect fields="id,username,full_name,specialty,active"/></step>
+
+  <step method="POST" path="/referrals" name="ref">
+    <body patient_id="1" case_id="7" specialty="Spec{rand}" reason="ear pain"/>
+    <expect fields="id,patient_id,case_id,doctor,specialty,specialist,reason,report,action,treatment,status,created"/>
+    <expect field="status" equals="pending"/><expect field="specialist" equals="s1_{rand}"/>
+  </step>
+  <step method="POST" path="/referrals" status="409"><body patient_id="1" specialty="NoSuchSpecialty{rand}" reason="x"/></step>
+  <step method="GET" path="/referrals?patient_id=1" list="true"><expect fields="id,patient_id,specialty,specialist,status"/></step>
+  <step method="PUT" path="/referrals/{ref.id}/report" status="422"><body report="findings"/></step>
+  <step method="PUT" path="/referrals/{ref.id}/report">
+    <body report="otitis media" action="recommended" treatment="Amoxicillin for 5 days"/>
+    <expect field="status" equals="reported"/><expect field="action" equals="recommended"/><expect field="treatment" equals="Amoxicillin for 5 days"/>
+  </step>
+  <step method="PUT" path="/referrals/999999/report" status="404"><body report="x" action="treated" treatment="y"/></step>
+</contract>

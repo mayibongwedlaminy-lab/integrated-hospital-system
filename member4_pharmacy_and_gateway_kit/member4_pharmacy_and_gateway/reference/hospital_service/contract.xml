@@ -1,0 +1,79 @@
+<!-- CONTRACT: hospital service (port 8001). Owner: hospital team.
+     The gateway, the portal, the pharmacy and the notification texts all rely on these paths and field names.
+     Changing one needs the other teams to agree first: edit the file in contracts/, bump version, tell everyone. -->
+<contract version="2" service="hospital" kind="service" port="8001">
+  <peer name="pharmacy" port="8004"/>  <!-- POST /prescriptions is forwarded to the pharmacy, so it must be running for that step -->
+  <privacy forbid="result,test,report,drug,dosage"/>  <!-- the hospital never stores other organisations' data -->
+
+  <!-- the hospital's own staff: a doctor with working days and hours, so appointments can be booked -->
+  <step method="POST" path="/staff" name="doc">
+    <body username="doc_{rand}" full_name="Dr. Contract Test" role="doctor" specialty="General Practice" working_days="Mon,Tue,Wed,Thu,Fri,Sat,Sun" start="00:00" end="23:30" slot_minutes="30"/>
+    <expect fields="id,username,full_name,role,specialty,working_days,start,end,slot_minutes,active"/><expect field="active" equals="yes"/>
+  </step>
+  <step method="POST" path="/staff" status="409"><body username="doc_{rand}" full_name="Duplicate" role="doctor"/></step>
+  <step method="POST" path="/staff" status="422"><body username="x_{rand}" full_name="Wrong role" role="pharmacist"/></step>
+  <step method="POST" path="/staff" status="422"><body username="y_{rand}" full_name="Bad day" role="doctor" working_days="Funday"/></step>
+  <step method="GET" path="/staff?role=doctor&amp;active=yes" list="true"><expect fields="id,username,full_name,working_days"/></step>
+  <step method="PUT" path="/staff/{doc.id}"><body specialty="Family Medicine"/><expect field="specialty" equals="Family Medicine"/></step>
+
+  <step method="POST" path="/patients" name="patient">
+    <body national_id="{rand}" name="Contract Test" dob="1990-01-01" allergies="penicillin"/>
+    <expect fields="id,national_id,name,dob,allergies,registered_by,created"/>
+  </step>
+  <step method="POST" path="/patients" status="409"><body national_id="{patient.national_id}" name="Duplicate"/></step>
+  <step method="GET" path="/patients?national_id={patient.national_id}" list="true"><expect fields="id,national_id,name"/></step>
+  <step method="GET" path="/patients/{patient.id}"><expect field="name" equals="Contract Test"/></step>
+  <step method="GET" path="/patients/999999" status="404"/>
+  <step method="PUT" path="/patients/{patient.id}"><body allergies="penicillin, latex"/><expect field="allergies" equals="penicillin, latex"/></step>
+
+  <!-- a consultation belongs to the doctor who started it (the gateway names them in x-user); the doctor treats it or refers -->
+  <step method="POST" path="/consultations" name="case">
+    <body patient_id="{patient.id}" symptoms="fever" temp="38.5" bp_sys="120" bp_dia="80" pulse="90" spo2="98"/>
+    <expect fields="id,patient_id,doctor,symptoms,vitals,temp,bp_sys,bp_dia,pulse,spo2,diagnosis,treatment,outcome,status,created"/>
+    <expect field="status" equals="open"/>
+  </step>
+  <step method="GET" path="/consultations/{case.id}"><expect field="symptoms" equals="fever"/></step>
+  <step method="GET" path="/consultations?patient_id={patient.id}" list="true"/>
+  <step method="PUT" path="/consultations/{case.id}/diagnosis">
+    <body diagnosis="Malaria" treatment="Artemether for 3 days"/>
+    <expect field="diagnosis" equals="Malaria"/><expect field="treatment" equals="Artemether for 3 days"/><expect field="outcome" equals="treating"/>
+  </step>
+
+  <step method="POST" path="/diagnoses"><body patient_id="{patient.id}" diagnosis="Malaria" notes="test"/><expect fields="id,patient_id,doctor,diagnosis,notes,created"/></step>
+  <step method="GET" path="/diagnoses?patient_id={patient.id}" list="true"/>
+
+  <!-- appointments are booked against the doctor's availability -->
+  <step method="POST" path="/appointments" name="appt">
+    <body patient_id="{patient.id}" doctor="{doc.username}" date="2031-01-01" time="09:00" reason="check-up"/>
+    <expect fields="id,patient_id,doctor,requested_doctor,date,time,reason,note,booked_by,status,created"/>
+    <expect field="status" equals="scheduled"/><expect field="doctor" equals="{doc.username}"/><expect field="time" equals="09:00"/>
+  </step>
+  <step method="POST" path="/appointments" name="appt2">
+    <body patient_id="{patient.id}" doctor="{doc.username}" date="2031-01-01" time="09:00" reason="same slot"/>
+    <expect field="doctor" equals="{doc.username}"/><expect field="time" equals="09:30"/><expect field="note" contains="next available slot"/>
+  </step>
+  <step method="POST" path="/appointments" status="422"><body patient_id="{patient.id}" date="2001-01-01" time="09:00"/></step>
+  <step method="PUT" path="/appointments/{appt.id}"><body status="cancelled"/><expect field="status" equals="cancelled"/></step>
+  <step method="GET" path="/appointments?patient_id={patient.id}" list="true"/>
+
+  <!-- time off: no appointments are booked on those days -->
+  <step method="POST" path="/time-off" name="off"><body doctor="{doc.username}" date_from="2031-02-01" date_to="2031-02-02" reason="conference"/><expect fields="id,doctor,date_from,date_to,reason,status"/></step>
+  <step method="POST" path="/appointments" name="appt3">
+    <body patient_id="{patient.id}" doctor="{doc.username}" date="2031-02-01" time="09:00"/>
+    <expect field="date" equals="2031-02-03"/><expect field="note" contains="next available slot"/>
+  </step>
+  <step method="PUT" path="/time-off/{off.id}"><body status="cancelled"/><expect field="status" equals="cancelled"/></step>
+  <step method="GET" path="/time-off" list="true"/>
+
+  <!-- forwarded to the pharmacy with the patient's allergy flags attached; the answer is the pharmacy's -->
+  <step method="POST" path="/prescriptions" privacy="off">
+    <body patient_id="{patient.id}" case_id="{case.id}" drug="Penicillin V" dosage="500 mg"/>
+    <expect fields="id,patient_id,drug,warning,interaction,status"/>
+    <expect field="warning" contains="ALLERGY CONFLICT"/>
+  </step>
+
+  <!-- the shortcut from the design document, section 2.7 -->
+  <step method="PUT" path="/consultations/{case.id}/close"><expect field="status" equals="closed"/></step>
+  <!-- what arrives from the broker when the pharmacy dispenses or a specialist answers: the same update, here done directly -->
+  <step method="PUT" path="/consultations/{case.id}"><body outcome="treated by specialist"/><expect field="outcome" equals="treated by specialist"/></step>
+</contract>

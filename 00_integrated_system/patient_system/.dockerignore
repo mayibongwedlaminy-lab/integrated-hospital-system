@@ -1,0 +1,14 @@
+.git
+**/__pycache__
+**/*.pyc
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/lab.json
+.pytest_cache
+*.zip
+fallback_python
+pharmacy_service/node_modules
+lab_service/build
+integration/tests/
+reference/

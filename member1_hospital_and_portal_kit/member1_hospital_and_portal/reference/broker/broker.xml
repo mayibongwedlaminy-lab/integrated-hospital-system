@@ -1,0 +1,29 @@
+<!-- The message broker (port 8005). JMS-style: queues = point-to-point, topics = publish/subscribe with durable subscriptions.
+     Every destination says who may send to it and who may receive from it. The client name travels in the x-client header. -->
+<broker port="8005" db="broker.db" admin="gateway">
+  <!-- visibility: how long a delivered message waits for its acknowledgement before it is offered again.
+       After max_deliveries failed deliveries a message moves to the dead-letter list for an administrator to retry. -->
+  <settings visibility_seconds="10" retry_delay_seconds="2" max_deliveries="5" keep_done_hours="24"/>
+
+  <!-- requests that could not be delivered straight away because the receiving service was offline (store-and-forward) -->
+  <queue name="lab.requests"         send="gateway"   receive="lab"        doc="Doctor's lab requests waiting for the laboratory"/>
+  <queue name="specialist.referrals" send="gateway"   receive="specialist" doc="Referrals waiting for the specialist clinic"/>
+
+  <!-- guaranteed delivery between organisations (FR9: dispensing closes the hospital case) -->
+  <queue name="hospital.case-closed" send="pharmacy"  receive="hospital"   doc="Pharmacy tells the hospital a prescription was dispensed"/>
+
+  <!-- the specialist clinic tells the hospital what happened to a referred consultation -->
+  <queue name="hospital.case-updates" send="specialist" receive="hospital" doc="Referral outcomes going back to the hospital consultation"/>
+
+  <!-- request / reply with the Java lab analyzer: orders go out, results come back with the same correlation id -->
+  <queue name="lab.analyzer.orders"  send="lab"       receive="analyzer"   doc="Tests the automated analyzer should run"/>
+  <queue name="lab.analyzer.results" send="analyzer"  receive="lab"        doc="Results coming back from the analyzer"/>
+
+  <!-- a scratch queue that nothing listens to, so contract checks and experiments never fight with the real consumers -->
+  <queue name="test.scratch"         send="*"         receive="*"          doc="Scratch queue for checks and experiments. Nothing consumes it."/>
+
+  <!-- publish/subscribe: every organisation announces what happened; each subscriber keeps its own copy until it has dealt with it -->
+  <topic name="events" send="hospital,lab,specialist,pharmacy">
+    <subscription name="gateway-notifications" receive="gateway"/>
+  </topic>
+</broker>

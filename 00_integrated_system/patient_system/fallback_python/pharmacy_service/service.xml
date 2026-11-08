@@ -1,0 +1,38 @@
+<service name="pharmacy" port="8004" db="pharmacy.db">
+  <!-- MESSAGING (replaces the old direct call to the hospital: if the hospital is down the message waits in the broker) -->
+  <messaging broker="http://localhost:8005" client="pharmacy">
+    <send after="POST /prescriptions" to="events" type="PrescriptionReceived" fields="id,patient_id,case_id,doctor,drug,dosage,warning,interaction"/>
+    <send after="PUT /prescriptions/{id}/dispense" to="events" type="PrescriptionDispensed" fields="id,patient_id,case_id,doctor,drug,pharmacist"/>
+    <!-- FR9: dispensing closes the hospital case -->
+    <send after="PUT /prescriptions/{id}/dispense" to="hospital.case-closed" fields="case_id" set="status=closed"/>
+  </messaging>
+
+  <!-- Drug interaction rules (demonstration list only, not clinical advice). A new prescription is checked
+       against everything else already prescribed to the same patient; a drug name matches by containing a word. -->
+  <interactions>
+    <pair a="warfarin"     b="aspirin"        level="major"    note="higher risk of serious bleeding"/>
+    <pair a="warfarin"     b="ibuprofen"      level="major"    note="higher risk of serious bleeding"/>
+    <pair a="aspirin"      b="ibuprofen"      level="moderate" note="more stomach bleeding and weaker heart protection"/>
+    <pair a="ibuprofen"    b="diclofenac"     level="moderate" note="two anti-inflammatories together"/>
+    <pair a="sildenafil"   b="isosorbide"     level="major"    note="blood pressure can fall dangerously"/>
+    <pair a="simvastatin"  b="clarithromycin" level="major"    note="risk of muscle damage"/>
+    <pair a="tramadol"     b="fluoxetine"     level="major"    note="risk of serotonin syndrome"/>
+    <pair a="methotrexate" b="amoxicillin"    level="moderate" note="methotrexate levels can rise"/>
+    <pair a="enalapril"    b="spironolactone" level="moderate" note="potassium can rise too high"/>
+  </interactions>
+
+  <table name="prescriptions" fields="patient_id,case_id,doctor,drug,dosage,allergies,warning,interaction,pharmacist,status=pending"/>
+  <table name="staff" fields="username,full_name,role=pharmacist,active=yes" unique="username"/>
+
+  <!-- FR8: hook="allergy" checks the drug against the allergy flags -->
+  <endpoint method="POST" path="/prescriptions" table="prescriptions" action="insert" hook="allergy,interaction" stamp="doctor"/>
+  <endpoint method="GET"  path="/prescriptions" table="prescriptions" action="list"/>
+
+  <!-- FR9: dispensing closes the hospital case (consultation) -->
+  <endpoint method="PUT" path="/prescriptions/{id}/dispense" table="prescriptions" action="update" set="status=dispensed" stamp="pharmacist"/>
+
+  <!-- the pharmacy's own staff -->
+  <endpoint method="POST" path="/pharmacists"      table="staff" action="insert"/>
+  <endpoint method="GET"  path="/pharmacists"      table="staff" action="list"/>
+  <endpoint method="PUT"  path="/pharmacists/{id}" table="staff" action="update"/>
+</service>

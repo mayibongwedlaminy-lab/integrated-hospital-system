@@ -1,0 +1,13 @@
+# One command:  docker compose up --build      then open http://localhost:8000/ui/
+services:
+  patient-system:
+    build: .
+    ports:
+      - "8000:8000"          # only the gateway is published; the four services stay inside the container
+    # environment:
+    #   PPS_SECRET: "a-long-random-string"   # optional: keeps people logged in across restarts
+    volumes:
+      - pps-data:/data       # databases survive restarts and rebuilds
+    restart: unless-stopped
+volumes:
+  pps-data:

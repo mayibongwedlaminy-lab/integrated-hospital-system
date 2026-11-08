@@ -1,0 +1,113 @@
+<gateway port="8000">
+  <!-- sign-in rules. The token-signing secret is not stored here: it is generated on first start (or set PPS_SECRET). -->
+  <security max_attempts="5" lock_minutes="5" token_minutes="60"/>
+  <upstream name="hospital"   url="http://localhost:8001"/>
+  <upstream name="laboratory" url="http://localhost:8002"/>
+  <upstream name="specialist" url="http://localhost:8003"/>
+  <upstream name="pharmacy"   url="http://localhost:8004"/>
+  <upstream name="broker"     url="http://localhost:8005"/>
+
+
+  <!-- The starting account. It is created once, on the very first start, and asks for a new password at its first sign-in.
+       Everyone else is added by this administrator in the portal (Administration, Add staff member).
+       Only a salted PBKDF2 hash is stored. To start with a different account:  python tools/make_user.py -->
+  <user name="admin" role="administrator" full_name="System Administrator" must_change="yes" salt="7b70bec549459158"
+        hash="c5cf3c5a2e5f50c213082de0164cb719e2f3a3c4092eec0ad48f7a009ea437ec"/>
+
+  <!-- Which organisation keeps each kind of staff member's own record (working hours, specialty...). The administrator adds staff in the portal;
+       the gateway creates the account and the record. "fields" are the extra details that organisation keeps. -->
+  <staff-role role="receptionist"   upstream="hospital"   path="/staff"/>
+  <staff-role role="doctor"         upstream="hospital"   path="/staff"       fields="specialty,working_days,start,end,slot_minutes"/>
+  <staff-role role="lab_technician" upstream="laboratory" path="/lab/staff"/>
+  <staff-role role="specialist"     upstream="specialist" path="/specialists" fields="specialty"/>
+  <staff-role role="pharmacist"     upstream="pharmacy"   path="/pharmacists"/>
+  <staff-role role="administrator"/>
+
+  <!-- definition files that /xml shows as styled pages (never list this file: it holds the secret) -->
+  <doc name="portal"     module="client" file="portal.xml"                  title="Portal: dashboards, forms and history timeline"/>
+  <doc name="hospital"   module="hospital_service" file="service.xml"       title="Hospital service: tables and endpoints"/>
+  <doc name="laboratory" module="lab_service" file="service.xml"            title="Laboratory service: tables and endpoints"/>
+  <doc name="specialist" module="specialist_service" file="service.xml"     title="Specialist service: tables and endpoints"/>
+  <doc name="pharmacy"   module="pharmacy_service" file="service.xml"       title="Pharmacy service: tables and endpoints"/>
+
+  <!-- endpoints the gateway answers itself (not forwarded to a service). Documentation, and used by contracts/check_portal.py -->
+  <local method="GET"  path="/notifications"                    roles="*"/>
+  <local method="POST" path="/notifications/read"               roles="*"/>
+  <local method="GET"  path="/api/status"                       roles="*"/>
+  <local method="GET"  path="/api/people"                       roles="*"/>
+  <local method="GET"  path="/audit"                            roles="administrator"/>
+  <local method="GET"  path="/api/messaging"                    roles="administrator"/>
+  <local method="POST" path="/api/messaging/{id}/retry"         roles="administrator"/>
+  <local method="GET"  path="/users"                            roles="administrator"/>
+  <local method="GET"  path="/api/staff"                        roles="administrator"/>
+  <local method="POST" path="/api/staff"                        roles="administrator"/>
+  <local method="PUT"  path="/api/staff/{id}"                   roles="administrator"/>
+  <local method="GET"  path="/api/patients/{id}/full-history"   roles="doctor"/>
+  <local method="GET"  path="/api/cases/{id}/discharge.pdf"     roles="doctor"/>
+
+  <!-- role-based routing table (FR1-FR9). queue="..." = if the service is offline, keep the request and deliver it later (202). -->
+  <!-- only receptionists register patients; receptionists and doctors may correct details such as allergies -->
+  <route method="POST" path="/patients"      upstream="hospital" roles="receptionist"/>
+  <route method="GET"  path="/patients"      upstream="hospital" roles="receptionist,doctor"/>
+  <route method="GET"  path="/patients/{id}" upstream="hospital" roles="receptionist,doctor"/>
+  <route method="PUT"  path="/patients/{id}" upstream="hospital" roles="receptionist,doctor"/>
+
+  <!-- appointments are booked against the doctors' availability; the hospital picks the doctor or the next free one -->
+  <route method="POST" path="/appointments"      upstream="hospital" roles="receptionist,doctor"/>
+  <route method="GET"  path="/appointments"      upstream="hospital" roles="receptionist,doctor"/>
+  <route method="PUT"  path="/appointments/{id}" upstream="hospital" roles="receptionist,doctor"/>
+
+  <!-- who works here: everybody may read the staff list; time off is the doctor's own -->
+  <route method="GET"  path="/staff"       upstream="hospital"   roles="receptionist,doctor,lab_technician,specialist,pharmacist,administrator"/>
+  <route method="GET"  path="/specialists" upstream="specialist" roles="receptionist,doctor,administrator"/>
+  <route method="GET"  path="/time-off"       upstream="hospital" roles="doctor,receptionist,administrator"/>
+  <route method="POST" path="/time-off"       upstream="hospital" roles="doctor"/>
+  <route method="PUT"  path="/time-off/{id}"  upstream="hospital" roles="doctor"/>
+
+  <!-- a doctor treats (diagnosis and treatment plan) or refers, and closes the case -->
+  <route method="POST" path="/consultations" upstream="hospital" roles="doctor"/>
+  <route method="GET"  path="/consultations" upstream="hospital" roles="doctor"/>
+  <route method="PUT"  path="/consultations/{id}/diagnosis" upstream="hospital" roles="doctor"/>
+  <route method="PUT"  path="/consultations/{id}/close"     upstream="hospital" roles="doctor"/>
+  <route method="POST" path="/diagnoses"     upstream="hospital" roles="doctor"/>
+  <route method="GET"  path="/diagnoses"     upstream="hospital" roles="doctor"/>
+  <route method="POST" path="/prescriptions" upstream="hospital" roles="doctor"/>
+
+  <route method="POST" path="/lab/requests"              upstream="laboratory" roles="doctor" queue="lab.requests"/>
+  <route method="GET"  path="/lab/requests"              upstream="laboratory" roles="doctor,lab_technician"/>
+  <route method="PUT"  path="/lab/results/{request_id}"  upstream="laboratory" roles="lab_technician"/>
+
+  <!-- a specialist treats the patient or recommends a treatment to the referring doctor -->
+  <route method="POST" path="/referrals"              upstream="specialist" roles="doctor" queue="specialist.referrals"/>
+  <route method="GET"  path="/referrals"              upstream="specialist" roles="doctor,specialist"/>
+  <route method="PUT"  path="/referrals/{id}/report"  upstream="specialist" roles="specialist"/>
+
+  <route method="GET" path="/prescriptions"                upstream="pharmacy" roles="doctor,pharmacist"/>
+  <route method="PUT" path="/prescriptions/{id}/dispense"  upstream="pharmacy" roles="pharmacist"/>
+
+  <!-- notifications: each organisation publishes an event to the broker's "events" topic; the gateway listens and tells the role named in "to".
+       user="field" = only the person named in that field of the event hears it (for example the doctor who asked for the test).
+       {field} comes from the event. "if" = only when that field is not empty. Notifications carry patient numbers, never names. -->
+  <notify event="AppointmentBooked"     to="doctor"         user="doctor"       text="New appointment on {date} at {time}, patient #{patient_id}"/>
+  <notify event="LabRequested"          to="lab_technician"                     text="New lab test: {test}, patient #{patient_id}"/>
+  <notify event="LabResultReady"        to="doctor"         user="requested_by" text="Lab result ready: {test}, patient #{patient_id}"/>
+  <notify event="ReferralSent"          to="specialist"     user="specialist"   text="New referral to {specialty}: {reason}"/>
+  <notify event="ReportReady"           to="doctor"         user="doctor"       text="Specialist report ready: {specialty} ({action}), patient #{patient_id}"/>
+  <notify event="PrescriptionReceived"  to="pharmacist"                         text="New prescription: {drug}, patient #{patient_id}"/>
+  <notify event="PrescriptionReceived"  to="pharmacist"     if="warning"        text="ALLERGY WARNING on {drug} (patient #{patient_id}): {warning}"/>
+  <notify event="PrescriptionReceived"  to="doctor"         user="doctor" if="warning" text="Allergy warning on your prescription: {drug} (patient #{patient_id})"/>
+  <notify event="PrescriptionReceived"  to="pharmacist"     if="interaction"    text="INTERACTION on {drug} (patient #{patient_id}): {interaction}"/>
+  <notify event="PrescriptionReceived"  to="doctor"         user="doctor" if="interaction" text="Interaction on your prescription: {drug} (patient #{patient_id})"/>
+  <notify event="PrescriptionDispensed" to="doctor"         user="doctor"       text="Dispensed: {drug}, patient #{patient_id}. Case #{case_id} is being closed."/>
+
+  <!-- FR10: GET /api/patients/{id}/full-history asks each source below -->
+  <history roles="doctor">
+    <source name="patient"       upstream="hospital"   path="/patients/{id}"/>
+    <source name="consultations" upstream="hospital"   path="/consultations?patient_id={id}"/>
+    <source name="diagnoses"     upstream="hospital"   path="/diagnoses?patient_id={id}"/>
+    <source name="appointments"  upstream="hospital"   path="/appointments?patient_id={id}"/>
+    <source name="lab_tests"     upstream="laboratory" path="/lab/requests?patient_id={id}"/>
+    <source name="referrals"     upstream="specialist" path="/referrals?patient_id={id}"/>
+    <source name="prescriptions" upstream="pharmacy"   path="/prescriptions?patient_id={id}"/>
+  </history>
+</gateway>

@@ -1,0 +1,40 @@
+<!-- CONTRACT: message broker (port 8005). Owner: messaging team.
+     Queues are point-to-point, topics are publish/subscribe with durable subscriptions. Destination names and who may use them are in broker.xml.
+     Every call carries x-service-key and x-client (who is calling), set here with client="...". -->
+<contract version="1" service="broker" kind="service" port="8005">
+
+  <!-- point-to-point: send, receive, acknowledge (on test.scratch, which no component consumes) -->
+  <step method="POST" path="/send" client="gateway" name="m1">
+    <body json='{"destination":"test.scratch","body":{"test":"Malaria"},"headers":{"type":"Scratch-{rand}"},"correlation_id":"c-{rand}"}'/>
+    <expect fields="id,delivered_to"/><expect field="delivered_to" equals="1"/>
+  </step>
+  <step method="POST" path="/receive" client="lab" name="got">
+    <body json='{"destination":"test.scratch","wait":2,"selector":"type=Scratch-{rand}"}'/>
+    <expect fields="id,body,headers,correlation_id,reply_to,deliveries"/><expect field="deliveries" equals="1"/><expect field="correlation_id" equals="c-{rand}"/>
+  </step>
+  <step method="POST" path="/receive" client="lab" status="204"><body json='{"destination":"test.scratch","wait":0,"selector":"type=Scratch-{rand}"}'/></step>
+  <step method="POST" path="/ack" client="lab"><body json='{"id":{got.id}}'/></step>
+  <step method="POST" path="/ack" client="lab" status="409"><body json='{"id":{got.id}}'/></step>
+
+  <!-- who may do what -->
+  <step method="POST" path="/send" client="lab" status="403"><body json='{"destination":"lab.requests","body":{}}'/></step>
+  <step method="POST" path="/receive" client="hospital" status="403"><body json='{"destination":"lab.requests","wait":0}'/></step>
+  <step method="POST" path="/send" client="gateway" status="404"><body json='{"destination":"does.not.exist","body":{}}'/></step>
+  <step method="GET" path="/admin/destinations" client="lab" status="403"/>
+
+  <!-- a message that cannot be processed goes to the dead-letter list, and an administrator can retry it -->
+  <step method="POST" path="/send" client="gateway"><body json='{"destination":"test.scratch","body":{"bad":true},"headers":{"type":"Bad-{rand}"}}'/></step>
+  <step method="POST" path="/receive" client="specialist" name="bad"><body json='{"destination":"test.scratch","wait":2,"selector":"type=Bad-{rand}"}'/></step>
+  <step method="POST" path="/nack" client="specialist"><body json='{"id":{bad.id},"dead":true,"reason":"contract test"}'/><expect field="dead" equals="True"/></step>
+  <step method="GET" path="/admin/messages?destination=test.scratch&amp;state=dead" client="gateway" list="true"><expect fields="id,body,reason,deliveries"/></step>
+  <step method="POST" path="/admin/retry" client="gateway"><body json='{"destination":"test.scratch"}'/><expect fields="retried"/></step>
+  <step method="POST" path="/receive" client="specialist" name="again"><body json='{"destination":"test.scratch","wait":2,"selector":"type=Bad-{rand}"}'/><expect field="deliveries" equals="1"/></step>
+  <step method="POST" path="/ack" client="specialist"><body json='{"id":{again.id}}'/></step>
+
+  <!-- publish/subscribe: one message to the topic is copied to each durable subscription (the gateway's subscription is consumed by the real gateway, so we only check the fan-out) -->
+  <step method="POST" path="/send" client="hospital"><body json='{"destination":"events","body":{"n":1},"headers":{"type":"Probe-{rand}"}}'/><expect field="delivered_to" equals="1"/></step>
+  <!-- a subscription is not a destination you can send to: you publish to the topic and the broker fills the subscriptions -->
+  <step method="POST" path="/send" client="pharmacy" status="404"><body json='{"destination":"events:gateway-notifications","body":{}}'/></step>
+  <step method="POST" path="/send" client="gateway" status="403"><body json='{"destination":"events","body":{}}'/></step>
+  <step method="GET" path="/admin/destinations" client="gateway" list="true"><expect fields="destination,kind,ready,inflight,dead,done,who_sends,who_receives"/></step>
+</contract>

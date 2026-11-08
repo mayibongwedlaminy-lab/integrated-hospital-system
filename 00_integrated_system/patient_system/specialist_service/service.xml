@@ -1,0 +1,25 @@
+<service name="specialist" port="8003" db="specialist.db">
+  <!-- MESSAGING -->
+  <messaging broker="http://localhost:8005" client="specialist">
+    <consume queue="specialist.referrals" endpoint="POST /referrals"/>
+    <send after="POST /referrals" to="events" type="ReferralSent" fields="id,patient_id,case_id,doctor,specialist,specialty,reason"/>
+    <!-- the doctor's consultation shows what happened to it: referred, treated by the specialist, or treatment recommended -->
+    <send after="POST /referrals" when="case_id!=" to="hospital.case-updates" fields="case_id" set="outcome=referred"/>
+    <send after="PUT /referrals/{id}/report" to="events" type="ReportReady" fields="id,patient_id,case_id,doctor,specialist,specialty,action,status"/>
+    <send after="PUT /referrals/{id}/report" when="action=treated,case_id!=" to="hospital.case-updates" fields="case_id" set="outcome=treated by specialist"/>
+    <send after="PUT /referrals/{id}/report" when="action=recommended,case_id!=" to="hospital.case-updates" fields="case_id" set="outcome=treatment recommended"/>
+  </messaging>
+
+  <table name="referrals" fields="patient_id,case_id,doctor,specialty,specialist,reason,report,action,treatment,status=pending"/>
+  <table name="staff" fields="username,full_name,specialty,active=yes" unique="username"/>
+
+  <endpoint method="POST" path="/referrals" table="referrals" action="insert" stamp="doctor" hook="assign_specialist"/>
+  <!-- a specialist only ever sees the referrals assigned to them (scope="role:column") -->
+  <endpoint method="GET"  path="/referrals" table="referrals" action="list" scope="specialist:specialist"/>
+  <endpoint method="PUT"  path="/referrals/{id}/report" table="referrals" action="update" set="status=reported" hook="answer_referral"/>
+
+  <!-- the specialist clinic's own staff, each with a specialty -->
+  <endpoint method="POST" path="/specialists"      table="staff" action="insert" hook="valid_staff"/>
+  <endpoint method="GET"  path="/specialists"      table="staff" action="list"/>
+  <endpoint method="PUT"  path="/specialists/{id}" table="staff" action="update" hook="valid_staff"/>
+</service>

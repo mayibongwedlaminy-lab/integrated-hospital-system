@@ -1,0 +1,57 @@
+<service name="hospital" port="8001" db="hospital.db">
+  <peer name="pharmacy" url="http://localhost:8004"/>  <!-- REST: the prescription needs an immediate allergy answer -->
+
+  <!-- MESSAGING: what arrives from, and what goes to, the message broker (the broker's address and this service's name) -->
+  <messaging broker="http://localhost:8005" client="hospital">
+    <!-- FR9: the pharmacy dispensed, so close the case. Guaranteed delivery: it waits in the queue if the hospital is down. -->
+    <consume queue="hospital.case-closed" endpoint="PUT /consultations/{id}" id="case_id"/>
+    <!-- the specialist clinic reports on a referral (referred, treated by the specialist, treatment recommended) -->
+    <consume queue="hospital.case-updates" endpoint="PUT /consultations/{id}" id="case_id"/>
+    <!-- tell everyone who is interested (published to the "events" topic) -->
+    <send after="POST /appointments" to="events" type="AppointmentBooked" fields="id,patient_id,doctor,date,time,reason,note"/>
+  </messaging>
+
+  <!-- stamp="doctor" etc. records WHO did it (the gateway tells the service who is acting) -->
+  <table name="patients"      fields="national_id,name,dob,allergies,registered_by" unique="national_id"/>
+  <table name="consultations" fields="patient_id,doctor,symptoms,vitals,temp,bp_sys,bp_dia,pulse,spo2,diagnosis,treatment,outcome,status=open"/>
+  <table name="diagnoses"     fields="patient_id,doctor,diagnosis,notes"/>
+  <table name="appointments"  fields="patient_id,doctor,requested_doctor,date,time,reason,note,booked_by,status=scheduled"/>
+  <!-- the hospital's own staff: doctors (with working days and hours) and receptionists -->
+  <table name="staff"         fields="username,full_name,role,specialty,working_days,start,end,slot_minutes,active=yes" unique="username"/>
+  <table name="time_off"      fields="doctor,date_from,date_to,reason,status=active"/>
+
+  <!-- only receptionists register patients (the gateway enforces it); editing is open to receptionists and doctors -->
+  <endpoint method="POST" path="/patients"      table="patients" action="insert" stamp="registered_by"/>
+  <endpoint method="GET"  path="/patients"      table="patients" action="list"/>
+  <endpoint method="GET"  path="/patients/{id}" table="patients" action="get"/>
+  <endpoint method="PUT"  path="/patients/{id}" table="patients" action="update"/>
+
+  <!-- a doctor treats (diagnosis and treatment plan) or refers; only the doctor who owns the consultation can change it -->
+  <endpoint method="POST" path="/consultations"      table="consultations" action="insert" stamp="doctor"/>
+  <endpoint method="GET"  path="/consultations"      table="consultations" action="list"/>
+  <endpoint method="GET"  path="/consultations/{id}" table="consultations" action="get"/>
+  <endpoint method="PUT"  path="/consultations/{id}" table="consultations" action="update" hook="own_case"/>
+  <endpoint method="PUT"  path="/consultations/{id}/diagnosis" table="consultations" action="update" set="outcome=treating" hook="own_case"/>
+  <endpoint method="PUT"  path="/consultations/{id}/close" table="consultations" action="update" set="status=closed" hook="own_case"/>
+
+  <!-- booking looks at the doctors' working days and hours, their time off and what is already booked (see hooks.py) -->
+  <endpoint method="POST" path="/appointments"      table="appointments" action="insert" hook="schedule" stamp="booked_by"/>
+  <endpoint method="GET"  path="/appointments"      table="appointments" action="list"/>
+  <endpoint method="PUT"  path="/appointments/{id}" table="appointments" action="update"/>
+
+  <endpoint method="POST" path="/diagnoses" table="diagnoses" action="insert" stamp="doctor"/>
+  <endpoint method="GET"  path="/diagnoses" table="diagnoses" action="list"/>
+
+  <endpoint method="POST" path="/staff"      table="staff" action="insert" hook="valid_staff"/>
+  <endpoint method="GET"  path="/staff"      table="staff" action="list"/>
+  <endpoint method="PUT"  path="/staff/{id}" table="staff" action="update" hook="valid_staff"/>
+
+  <endpoint method="POST" path="/time-off"      table="time_off" action="insert" stamp="doctor" hook="own_time_off"/>
+  <endpoint method="GET"  path="/time-off"      table="time_off" action="list"/>
+  <endpoint method="PUT"  path="/time-off/{id}" table="time_off" action="update" hook="own_time_off"/>
+
+  <!-- FR7: prescription goes to the pharmacy, with only the patient's allergy flags attached -->
+  <endpoint method="POST" path="/prescriptions" action="forward" peer="pharmacy">
+    <attach table="patients" key="patient_id" field="allergies"/>
+  </endpoint>
+</service>

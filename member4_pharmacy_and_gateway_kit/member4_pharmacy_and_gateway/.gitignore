@@ -1,0 +1,10 @@
+*.db
+*.db-wal
+*.db-shm
+lab.json
+lab.json.tmp
+__pycache__/
+.pytest_cache/
+node_modules/
+build/
+*.zip

@@ -1,0 +1,87 @@
+<!-- CONTRACT: gateway (port 8000). Owner: gateway team. Needs the four services and the broker running.
+     Nothing is pre-loaded: this contract signs in as the starting administrator, creates its own staff through the admin API, and uses them.
+     (Running it again is harmless: existing accounts are updated and their passwords reset.) -->
+<contract version="2" service="gateway" kind="gateway" port="8000">
+  <account name="admin" user="admin" password="admin123"/>
+  <account name="reception" user="c_reception" password="contract-pass-1"/>
+  <account name="doctor" user="c_doctor" password="contract-pass-1"/>
+  <account name="doctor2" user="c_doctor2" password="contract-pass-1"/>
+  <account name="lab" user="c_lab" password="contract-pass-1"/>
+  <account name="specialist" user="c_specialist" password="contract-pass-1"/>
+  <account name="pharmacist" user="c_pharm" password="contract-pass-1"/>
+
+  <!-- signing in -->
+  <step method="POST" path="/auth/login" status="401"><body username="contract_nobody" password="x"/></step>
+  <step method="GET" path="/patients" status="401"/>
+  <step method="GET" path="/nothing-here" as="admin" status="404"/>
+
+  <!-- the administrator creates every account (and each person's record at their organisation) -->
+  <step method="POST" path="/api/staff" as="admin"><body username="c_reception" role="receptionist" full_name="Contract Receptionist" password="contract-pass-1"/><expect fields="id,username,full_name,role,created"/></step>
+  <step method="POST" path="/api/staff" as="admin">
+    <body username="c_doctor" role="doctor" full_name="Dr. Contract One" password="contract-pass-1" specialty="General Practice" working_days="Mon,Tue,Wed,Thu,Fri,Sat,Sun" start="00:00" end="23:30" slot_minutes="30"/>
+  </step>
+  <step method="POST" path="/api/staff" as="admin">
+    <body username="c_doctor2" role="doctor" full_name="Dr. Contract Two" password="contract-pass-1" specialty="General Practice" working_days="Mon,Tue,Wed,Thu,Fri,Sat,Sun" start="00:00" end="23:30" slot_minutes="30"/>
+  </step>
+  <step method="POST" path="/api/staff" as="admin"><body username="c_lab" role="lab_technician" full_name="Contract Technician" password="contract-pass-1"/></step>
+  <step method="POST" path="/api/staff" as="admin"><body username="c_specialist" role="specialist" full_name="Dr. Contract Specialist" password="contract-pass-1" specialty="ENT{rand}"/></step>
+  <step method="POST" path="/api/staff" as="admin"><body username="c_pharm" role="pharmacist" full_name="Contract Pharmacist" password="contract-pass-1"/></step>
+  <step method="POST" path="/api/staff" as="admin" status="422"><body username="c_short" role="pharmacist" full_name="Short" password="abc"/></step>
+  <step method="POST" path="/api/staff" as="admin" status="409"><body username="c_doctor" role="pharmacist" full_name="Wrong role"/></step>
+  <step method="POST" path="/api/staff" as="doctor" status="403"><body username="c_sneaky" role="pharmacist" full_name="Sneaky" password="contract-pass-1"/></step>
+  <step method="GET" path="/api/staff" as="admin" list="true"><expect fields="id,username,full_name,role,specialty,schedule,active"/></step>
+  <step method="GET" path="/api/people" as="doctor" list="true"><expect fields="id,username,full_name,role"/></step>
+
+  <!-- only receptionists register patients -->
+  <step method="POST" path="/patients" as="doctor" status="403"><body national_id="{rand}" name="Not allowed"/></step>
+  <step method="GET" path="/patients" as="pharmacist" status="403"/>
+  <step method="POST" path="/patients" as="reception" name="patient">
+    <body national_id="{rand}" name="Gateway Contract" dob="1990-01-01" allergies="penicillin"/><expect fields="id,national_id,name,registered_by"/><expect field="registered_by" equals="c_reception"/>
+  </step>
+
+  <!-- an appointment is booked with the doctor asked for when free -->
+  <step method="POST" path="/appointments" as="reception" name="appt">
+    <body patient_id="{patient.id}" doctor="c_doctor" date="2031-03-03" time="10:00" reason="check-up"/>
+    <expect field="doctor" equals="c_doctor"/><expect field="booked_by" equals="c_reception"/>
+  </step>
+  <step method="POST" path="/appointments" as="reception">
+    <body patient_id="{patient.id}" doctor="c_doctor" date="2031-03-03" time="10:00" reason="same time"/>
+    <expect field="note" contains="not available then"/>
+  </step>
+
+  <!-- the doctor owns the consultation: they treat it, and another doctor cannot touch it -->
+  <step method="POST" path="/consultations" as="doctor" name="case"><body patient_id="{patient.id}" symptoms="fever" temp="38.5"/><expect field="doctor" equals="c_doctor"/><expect field="status" equals="open"/></step>
+  <step method="PUT" path="/consultations/{case.id}/diagnosis" as="doctor2" status="403"><body diagnosis="x" treatment="y"/></step>
+  <step method="PUT" path="/consultations/{case.id}/diagnosis" as="lab" status="403"><body diagnosis="x"/></step>
+  <step method="PUT" path="/consultations/{case.id}/diagnosis" as="doctor"><body diagnosis="Malaria" treatment="Artemether"/><expect field="outcome" equals="treating"/></step>
+
+  <step method="POST" path="/lab/requests" as="doctor" name="test"><body patient_id="{patient.id}" case_id="{case.id}" test="Full blood count"/><expect field="requested_by" equals="c_doctor"/></step>
+  <step method="PUT" path="/lab/results/{test.id}" as="lab"><body result="normal"/><expect field="status" equals="completed"/><expect field="technician" equals="c_lab"/></step>
+
+  <!-- the doctor refers; the specialist (of that specialty) treats or recommends -->
+  <step method="POST" path="/referrals" as="doctor" name="ref"><body patient_id="{patient.id}" case_id="{case.id}" specialty="ENT{rand}" reason="ear"/><expect field="specialist" equals="c_specialist"/></step>
+  <step method="GET" path="/referrals" as="specialist" list="true"><expect fields="id,specialty,specialist,status"/></step>
+  <step method="PUT" path="/referrals/{ref.id}/report" as="specialist"><body report="otitis" action="recommended" treatment="Amoxicillin"/><expect field="status" equals="reported"/><expect field="action" equals="recommended"/></step>
+
+  <step method="POST" path="/prescriptions" as="doctor" name="rx">
+    <body patient_id="{patient.id}" case_id="{case.id}" drug="Penicillin V" dosage="500 mg"/>
+    <expect fields="id,doctor,warning,interaction"/><expect field="warning" contains="ALLERGY CONFLICT"/><expect field="doctor" equals="c_doctor"/>
+  </step>
+  <step method="PUT" path="/prescriptions/{rx.id}/dispense" as="pharmacist"><expect field="status" equals="dispensed"/><expect field="pharmacist" equals="c_pharm"/></step>
+
+  <step method="GET" path="/api/patients/{patient.id}/full-history" as="doctor">
+    <expect fields="patient,consultations,diagnoses,lab_tests,referrals,prescriptions,appointments"/>
+  </step>
+  <step method="GET" path="/api/cases/{case.id}/discharge.pdf" as="doctor" raw="true" content_type="application/pdf"/>
+  <step method="GET" path="/notifications" as="doctor" list="true" retry="10"><expect fields="id,time,text,unread"/></step>
+  <step method="GET" path="/audit" as="admin" list="true"><expect fields="time,user,role,method,path,status"/></step>
+  <step method="GET" path="/audit" as="doctor" status="403"/>
+
+  <!-- passwords and deactivation -->
+  <step method="POST" path="/api/password" as="doctor2" status="401"><body current_password="wrong" new_password="another-pass-1"/></step>
+  <step method="POST" path="/api/password" as="doctor2" status="422"><body current_password="contract-pass-1" new_password="short"/></step>
+  <step method="PUT" path="/api/staff/c_pharm" as="admin"><body active="no"/></step>
+  <step method="GET" path="/prescriptions" as="pharmacist" status="401"/>
+  <step method="PUT" path="/api/staff/c_pharm" as="admin"><body active="yes"/></step>
+  <step method="PUT" path="/api/staff/admin" as="admin" status="409"><body active="no"/></step>
+</contract>

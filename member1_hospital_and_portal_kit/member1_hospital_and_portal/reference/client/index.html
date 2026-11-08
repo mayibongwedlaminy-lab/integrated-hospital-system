@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0072BC">
+<meta name="color-scheme" content="light dark">
+<title>Patient Processing System</title>
+<script src="theme.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the main content</a>
+<header class="nav">
+  <a class="brand" href="/ui/"><span class="hex" aria-hidden="true"></span><b>Patient Processing System</b></a>
+  <div id="status" class="status" role="group" aria-label="Service status"></div>
+  <button class="btn ghost" id="theme" type="button" aria-label="Colour theme: follows your system. Press to change.">Theme: Auto</button>
+  <div id="who" class="who" hidden>
+    <span class="me"><b id="who-name"></b><small id="who-role"></small></span>
+    <button class="btn ghost" id="pw" type="button">Password</button>
+    <button class="btn ghost bell" id="bell" type="button" aria-label="Notifications"><span>Alerts</span><span id="bell-n" class="count" hidden></span></button>
+    <button class="btn ghost" id="logout" type="button">Log out</button>
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+<section id="login-view" class="login-hero" aria-labelledby="intro-title">
+  <div class="login-grid">
+    <div class="intro">
+      <h1 id="intro-title">One patient record across four organisations</h1>
+      <p>The hospital, laboratory, specialist clinic and pharmacy each keep their own data. This portal connects them for the people who need it.</p>
+      <ul class="orgs">
+        <li><b>Hospital</b><small>Registration, consultations, diagnoses</small></li>
+        <li><b>Laboratory</b><small>Test requests and results</small></li>
+        <li><b>Specialist clinic</b><small>Referrals and expert reports</small></li>
+        <li><b>Pharmacy</b><small>Allergy checks and dispensing</small></li>
+      </ul>
+    </div>
+    <form id="login-form" class="card login">
+      <h2>Log in</h2>
+      <p class="dim">Sign in with your own account. First time here? Sign in as <b>admin</b> (the starting password is in the README), choose a new password, then add your staff under Administration.</p>
+      <label class="field"><span class="lbl">Username</span><input id="u" autocomplete="username" required></label>
+      <label class="field"><span class="lbl">Password</span><input id="p" type="password" autocomplete="current-password" required></label>
+      <p id="login-error" class="error" role="alert"></p>
+      <button class="btn primary block">Log in</button>
+    </form>
+  </div>
+</section>
+
+<div id="app-view" hidden>
+  <section class="hero">
+    <div class="wrap">
+      <h1 id="hero-title"></h1>
+      <p id="hero-sub"></p>
+      <div id="hero-actions" class="row"></div>
+    </div>
+  </section>
+  <div class="wrap pull">
+    <div id="stats" class="stats" role="list" aria-label="Summary"></div>
+    <div id="charts" class="charts"></div>
+    <section class="card list" aria-label="Records">
+      <div class="tabbar">
+        <div id="tabs" role="tablist" aria-label="Lists"></div>
+        <div class="tools">
+          <label class="chk" id="mine-wrap" hidden><input type="checkbox" id="mine" checked> Only mine</label>
+          <input id="q" type="search" placeholder="Search this list" aria-label="Search this list">
+          <button class="btn" type="button" data-export>Export CSV</button>
+          <button class="btn" type="button" id="refresh">Refresh</button>
+        </div>
+      </div>
+      <div id="table" role="tabpanel"></div>
+    </section>
+  </div>
+</div>
+</main>
+
+<footer class="foot"><a href="/xml">XML definitions</a><a href="/docs">API documentation</a></footer>
+<dialog id="dlg"></dialog>
+<div id="toasts" aria-live="polite"></div>
+<script src="app.js"></script>
+</body>
+</html>
